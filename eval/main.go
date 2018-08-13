@@ -2,12 +2,13 @@ package main
 
 import (
 	"fmt"
-	"github.com/dgryski/go-tsz"
-	"github.com/dgryski/go-tsz/testdata"
 	"math"
 	"math/rand"
 	"os"
 	"text/tabwriter"
+
+	"github.com/tsenart/go-tsz"
+	"github.com/tsenart/go-tsz/testdata"
 )
 
 // collection of 24h worth of minutely points, with different characteristics.

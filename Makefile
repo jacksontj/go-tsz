@@ -1,11 +1,11 @@
 # MAKEFILE
 #
 # @author      Nicola Asuni <info@tecnick.com>
-# @link        https://github.com/dgryski/go-tsz
+# @link        https://github.com/tsenart/go-tsz
 #
 # This file is intended to be executed in a Linux-compatible system.
 # It also assumes that the project has been cloned in the right path under GOPATH:
-# $GOPATH/src/github.com/dgryski/go-tsz
+# $GOPATH/src/github.com/tsenart/go-tsz
 #
 # ------------------------------------------------------------------------------
 
@@ -16,13 +16,13 @@
 SHELL=/bin/bash
 
 # CVS path (path to the parent dir containing the project)
-CVSPATH=github.com/dgryski
+CVSPATH=github.com/tsenart
 
 # Project owner
-OWNER=dgryski
+OWNER=tsenart
 
 # Project vendor
-VENDOR=dgryski
+VENDOR=tsenart
 
 # Project name
 PROJECT=go-tsz
