@@ -180,6 +180,36 @@ func TestRoundtrip(t *testing.T) {
 	}
 }
 
+func TestRoundtrip_LargeUint64s(t *testing.T) {
+	t0 := (^uint64(0)) - 10000
+	s := New(t0)
+	for i := uint64(0); i < 10000; i++ {
+		s.Push(t0+i, float64(i))
+	}
+
+	it := s.Iter()
+	for i := uint64(0); i < 10000; i++ {
+		if !it.Next() {
+			t.Fatalf("Next()=false, want true")
+		}
+		tt, vv := it.Values()
+		// t.Logf("it.Values()=(%+v, %+v)\n", time.Unix(int64(tt), 0), vv)
+		wt := t0 + i
+		wv := float64(i)
+		if wt != tt || wv != vv {
+			t.Errorf("Values()=(%v,%v), want (%v,%v)\n", tt, vv, wt, wv)
+		}
+	}
+
+	if it.Next() {
+		t.Fatalf("Next()=true, want false")
+	}
+
+	if err := it.Err(); err != nil {
+		t.Errorf("it.Err()=%v, want nil", err)
+	}
+}
+
 func TestConcurrentRoundtripImmediateWrites(t *testing.T) {
 	testConcurrentRoundtrip(t, time.Duration(0))
 }
