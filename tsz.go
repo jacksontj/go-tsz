@@ -70,7 +70,8 @@ func (s *Series) Finish() {
 	s.Unlock()
 }
 
-// Push a timestamp and value to the series
+// Push a timestamp and value to the series.
+// Values must be inserted in monotonically increasing time order.
 func (s *Series) Push(t uint64, v float64) {
 	s.Lock()
 	defer s.Unlock()
