@@ -9,8 +9,8 @@ import (
 )
 
 func TestMarshalBinary(t *testing.T) {
-	s1 := New(testdata.TwoHoursData[0].T)
-	for _, p := range testdata.TwoHoursData {
+	s1 := New(testdata.Data[0].T)
+	for _, p := range testdata.Data {
 		s1.Push(p.T, p.V)
 	}
 	it1 := s1.Iter()
@@ -25,7 +25,7 @@ func TestMarshalBinary(t *testing.T) {
 		t.Error(err)
 	}
 	it := s2.Iter()
-	for _, w := range testdata.TwoHoursData {
+	for _, w := range testdata.Data {
 		if !it.Next() {
 			t.Fatalf("Next()=false, want true")
 		}
@@ -40,8 +40,8 @@ func TestMarshalBinary(t *testing.T) {
 func BenchmarkMarshalBinary(b *testing.B) {
 	var err error
 	b.StopTimer()
-	s1 := New(testdata.TwoHoursData[0].T)
-	for _, p := range testdata.TwoHoursData {
+	s1 := New(testdata.Data[0].T)
+	for _, p := range testdata.Data {
 		s1.Push(p.T, p.V)
 	}
 	s1.Finish()
@@ -58,8 +58,8 @@ func BenchmarkMarshalBinary(b *testing.B) {
 func BenchmarkUnmarshalBinary(b *testing.B) {
 	var err error
 	b.StopTimer()
-	s1 := New(testdata.TwoHoursData[0].T)
-	for _, p := range testdata.TwoHoursData {
+	s1 := New(testdata.Data[0].T)
+	for _, p := range testdata.Data {
 		s1.Push(p.T, p.V)
 	}
 	s1.Finish()
@@ -154,13 +154,13 @@ func TestExampleEncoding(t *testing.T) {
 
 func TestRoundtrip(t *testing.T) {
 
-	s := New(testdata.TwoHoursData[0].T)
-	for _, p := range testdata.TwoHoursData {
+	s := New(testdata.Data[0].T)
+	for _, p := range testdata.Data {
 		s.Push(p.T, p.V)
 	}
 
 	it := s.Iter()
-	for _, w := range testdata.TwoHoursData {
+	for _, w := range testdata.Data {
 		if !it.Next() {
 			t.Fatalf("Next()=false, want true")
 		}
@@ -192,7 +192,7 @@ func TestConcurrentRoundtrip10MsBetweenWrites(t *testing.T) {
 
 // Test reading while writing at the same time.
 func testConcurrentRoundtrip(t *testing.T, sleep time.Duration) {
-	s := New(testdata.TwoHoursData[0].T)
+	s := New(testdata.Data[0].T)
 
 	//notify the reader about the number of points that have been written.
 	writeNotify := make(chan int)
@@ -215,8 +215,8 @@ func testConcurrentRoundtrip(t *testing.T, sleep time.Duration) {
 				// read all of the points in the series.
 				for it.Next() {
 					tt, vv := it.Values()
-					expectedT := testdata.TwoHoursData[read].T
-					expectedV := testdata.TwoHoursData[read].V
+					expectedT := testdata.Data[read].T
+					expectedV := testdata.Data[read].V
 					if expectedT != tt || expectedV != vv {
 						t.Errorf("metric values dont match what was written. (%d, %f) != (%d, %f)\n", tt, vv, expectedT, expectedV)
 					}
@@ -248,7 +248,7 @@ func testConcurrentRoundtrip(t *testing.T, sleep time.Duration) {
 
 	// write points to the series.
 	for i := 0; i < 100; i++ {
-		s.Push(testdata.TwoHoursData[i].T, testdata.TwoHoursData[i].V)
+		s.Push(testdata.Data[i].T, testdata.Data[i].V)
 		writeNotify <- i + 1
 		time.Sleep(sleep)
 	}
@@ -256,19 +256,19 @@ func testConcurrentRoundtrip(t *testing.T, sleep time.Duration) {
 }
 
 func BenchmarkEncode(b *testing.B) {
-	b.SetBytes(int64(len(testdata.TwoHoursData) * 12))
+	b.SetBytes(int64(len(testdata.Data) * 12))
 	for i := 0; i < b.N; i++ {
-		s := New(testdata.TwoHoursData[0].T)
-		for _, tt := range testdata.TwoHoursData {
+		s := New(testdata.Data[0].T)
+		for _, tt := range testdata.Data {
 			s.Push(tt.T, tt.V)
 		}
 	}
 }
 
 func BenchmarkDecodeSeries(b *testing.B) {
-	b.SetBytes(int64(len(testdata.TwoHoursData) * 12))
-	s := New(testdata.TwoHoursData[0].T)
-	for _, tt := range testdata.TwoHoursData {
+	b.SetBytes(int64(len(testdata.Data) * 12))
+	s := New(testdata.Data[0].T)
+	for _, tt := range testdata.Data {
 		s.Push(tt.T, tt.V)
 	}
 
@@ -284,9 +284,9 @@ func BenchmarkDecodeSeries(b *testing.B) {
 }
 
 func BenchmarkDecodeByteSlice(b *testing.B) {
-	b.SetBytes(int64(len(testdata.TwoHoursData) * 12))
-	s := New(testdata.TwoHoursData[0].T)
-	for _, tt := range testdata.TwoHoursData {
+	b.SetBytes(int64(len(testdata.Data) * 12))
+	s := New(testdata.Data[0].T)
+	for _, tt := range testdata.Data {
 		s.Push(tt.T, tt.V)
 	}
 
