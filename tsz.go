@@ -20,7 +20,6 @@ import (
 type Series struct {
 	sync.Mutex
 
-	// TODO(dgryski): timestamps in the paper are uint64
 	T0  uint64
 	t   uint64
 	val float64
@@ -30,7 +29,7 @@ type Series struct {
 	trailing uint8
 	finished bool
 
-	tDelta uint64
+	tDelta uint32
 }
 
 // New series
@@ -41,7 +40,7 @@ func New(t0 uint64) *Series {
 	}
 
 	// block header
-	s.bw.writeBits(uint64(t0), 32)
+	s.bw.writeBits(uint64(t0), 64)
 
 	return &s
 
@@ -80,63 +79,59 @@ func (s *Series) Push(t uint64, v float64) {
 		// first point
 		s.t = t
 		s.val = v
-		s.tDelta = t - s.T0
-		s.bw.writeBits(uint64(s.tDelta), 14)
+		s.tDelta = uint32(t - s.T0)
+		s.bw.writeBits(uint64(s.tDelta), 27)
 		s.bw.writeBits(math.Float64bits(v), 64)
 		return
 	}
 
-	tDelta := t - s.t
-	dod := int64(tDelta - s.tDelta)
+	// Difference to the original Facebook paper, we store the first delta as 27
+	// bits to allow millisecond accuracy for a one day block.
+	tDelta := uint32(t - s.t)
+	d := int32(tDelta - s.tDelta)
 
-	switch {
-	case dod == 0:
+	if d == 0 {
 		s.bw.writeBit(zero)
-	case -63 <= dod && dod <= 64:
-		s.bw.writeBits(0x02, 2) // '10'
-		s.bw.writeBits(uint64(dod), 7)
-	case -255 <= dod && dod <= 256:
-		s.bw.writeBits(0x06, 3) // '110'
-		s.bw.writeBits(uint64(dod), 9)
-	case -2047 <= dod && dod <= 2048:
-		s.bw.writeBits(0x0e, 4) // '1110'
-		s.bw.writeBits(uint64(dod), 12)
-	default:
-		s.bw.writeBits(0x0f, 4) // '1111'
-		s.bw.writeBits(uint64(dod), 32)
+	} else {
+		// Increase by one in the decompressing phase as we have one free bit
+		switch dod := encodeZigZag32(d) - 1; 32 - bits.LeadingZeros32(dod) {
+		case 1, 2, 3, 4, 5, 6, 7:
+			s.bw.writeBits(uint64(dod|256), 9) // dod | 00000000000000000000000100000000
+		case 8, 9:
+			s.bw.writeBits(uint64(dod|3072), 12) // dod | 00000000000000000000110000000000
+		case 10, 11, 12:
+			s.bw.writeBits(uint64(dod|57344), 16) // dod | 00000000000000001110000000000000
+		default:
+			s.bw.writeBits(0x0f, 4) // '1111'
+			s.bw.writeBits(uint64(dod), 32)
+		}
 	}
 
-	vDelta := math.Float64bits(v) ^ math.Float64bits(s.val)
+	vDelta := math.Float64bits(s.val) ^ math.Float64bits(v)
 
 	if vDelta == 0 {
 		s.bw.writeBit(zero)
 	} else {
-		s.bw.writeBit(one)
-
 		leading := uint8(bits.LeadingZeros64(vDelta))
 		trailing := uint8(bits.TrailingZeros64(vDelta))
 
-		// clamp number of leading zeros to avoid overflow when encoding
-		if leading >= 32 {
-			leading = 31
-		}
+		s.bw.writeBit(one)
 
-		// TODO(dgryski): check if it's 'cheaper' to reset the leading/trailing bits instead
-		if s.leading != ^uint8(0) && leading >= s.leading && trailing >= s.trailing {
+		if leading >= s.leading && trailing >= s.trailing {
 			s.bw.writeBit(zero)
 			s.bw.writeBits(vDelta>>s.trailing, 64-int(s.leading)-int(s.trailing))
 		} else {
-			s.leading, s.trailing = leading, trailing
-
 			s.bw.writeBit(one)
-			s.bw.writeBits(uint64(leading), 5)
 
-			// Note that if leading == trailing == 0, then sigbits == 64.  But that value doesn't actually fit into the 6 bits we have.
-			// Luckily, we never need to encode 0 significant bits, since that would put us in the other case (vdelta == 0).
-			// So instead we write out a 0 and adjust it back to 64 on unpacking.
+			// Different from version 1.x, use (significantBits - 1) in storage - avoids a branch
 			sigbits := 64 - leading - trailing
-			s.bw.writeBits(uint64(sigbits), 6)
-			s.bw.writeBits(vDelta>>trailing, int(sigbits))
+
+			// Different from original, bits 5 -> 6, avoids a branch, allows storing small longs
+			s.bw.writeBits(uint64(leading), 6)             // Number of leading zeros in the next 6 bits
+			s.bw.writeBits(uint64(sigbits-1), 6)           // Length of meaningful bits in the next 6 bits
+			s.bw.writeBits(vDelta>>trailing, int(sigbits)) // Store the meaningful bits of XOR
+
+			s.leading, s.trailing = leading, trailing
 		}
 	}
 
@@ -170,7 +165,7 @@ type Iter struct {
 
 	finished bool
 
-	tDelta uint64
+	tDelta uint32
 	err    error
 }
 
@@ -178,7 +173,7 @@ func bstreamIterator(br *bstream) (*Iter, error) {
 
 	br.count = 8
 
-	t0, err := br.readBits(32)
+	t0, err := br.readBits(64)
 	if err != nil {
 		return nil, err
 	}
@@ -203,13 +198,19 @@ func (it *Iter) Next() bool {
 
 	if it.t == 0 {
 		// read first t and v
-		tDelta, err := it.br.readBits(14)
+		tDelta, err := it.br.readBits(27)
 		if err != nil {
 			it.err = err
 			return false
 		}
-		it.tDelta = uint64(tDelta)
-		it.t = it.T0 + it.tDelta
+
+		if tDelta == (1<<27)-1 {
+			it.finished = true
+			return false
+		}
+
+		it.tDelta = uint32(tDelta)
+		it.t = it.T0 + tDelta
 		v, err := it.br.readBits(64)
 		if err != nil {
 			it.err = err
@@ -222,113 +223,72 @@ func (it *Iter) Next() bool {
 	}
 
 	// read delta-of-delta
-	var d byte
-	for i := 0; i < 4; i++ {
-		d <<= 1
-		bit, err := it.br.readBit()
-		if err != nil {
-			it.err = err
-			return false
-		}
-		if bit == zero {
-			break
-		}
-		d |= 1
-	}
-
-	var dod int64
-	var sz uint
-	switch d {
-	case 0x00:
-		// dod == 0
-	case 0x02:
-		sz = 7
-	case 0x06:
-		sz = 9
-	case 0x0e:
-		sz = 12
-	case 0x0f:
-		bits, err := it.br.readBits(32)
-		if err != nil {
-			it.err = err
-			return false
-		}
-
-		// end of stream
-		if bits == 0xffffffff {
-			it.finished = true
-			return false
-		}
-
-		dod = int64(bits)
-	}
-
-	if sz != 0 {
-		bits, err := it.br.readBits(int(sz))
-		if err != nil {
-			it.err = err
-			return false
-		}
-		if bits > (1 << (sz - 1)) {
-			// or something
-			bits = bits - (1 << sz)
-		}
-		dod = int64(bits)
-	}
-
-	tDelta := it.tDelta + uint64(dod)
-
-	it.tDelta = tDelta
-	it.t = it.t + it.tDelta
-
-	// read compressed value
-	bit, err := it.br.readBit()
+	d, err := it.br.readUntilZero(4)
 	if err != nil {
 		it.err = err
 		return false
 	}
 
-	if bit == zero {
-		// it.val = it.val
-	} else {
-		bit, itErr := it.br.readBit()
-		if itErr != nil {
-			it.err = err
-			return false
-		}
-		if bit == zero {
-			// reuse leading/trailing zero bits
-			// it.leading, it.trailing = it.leading, it.trailing
-		} else {
-			bits, err := it.br.readBits(5)
-			if err != nil {
-				it.err = err
-				return false
-			}
-			it.leading = uint8(bits)
-
-			bits, err = it.br.readBits(6)
-			if err != nil {
-				it.err = err
-				return false
-			}
-			mbits := uint8(bits)
-			// 0 significant bits here means we overflowed and we actually need 64; see comment in encoder
-			if mbits == 0 {
-				mbits = 64
-			}
-			it.trailing = 64 - it.leading - mbits
+	if d != 0 {
+		var sz uint
+		switch d {
+		case 0x02:
+			sz = 7
+		case 0x06:
+			sz = 9
+		case 0x0e:
+			sz = 12
+		case 0x0f:
+			sz = 32
 		}
 
-		mbits := int(64 - it.leading - it.trailing)
-		bits, err := it.br.readBits(mbits)
+		bits, err := it.br.readBits(int(sz))
 		if err != nil {
 			it.err = err
 			return false
 		}
-		vbits := math.Float64bits(it.val)
-		vbits ^= (bits << it.trailing)
-		it.val = math.Float64frombits(vbits)
+
+		if sz == 32 && bits == 0xffffffff {
+			it.finished = true
+			return false
+		}
+
+		dod := decodeZigZag32(uint32(int64(bits) + 1))
+		it.tDelta += uint32(dod)
+	}
+
+	it.t += uint64(it.tDelta)
+
+	val, err := it.br.readUntilZero(2)
+	if err != nil {
+		it.err = err
+		return false
+	}
+
+	switch val {
+	case 3:
+		bits, err := it.br.readBits(6)
+		if err != nil {
+			it.err = err
+			return false
+		}
+		it.leading = uint8(bits)
+
+		bits, err = it.br.readBits(6)
+		if err != nil {
+			it.err = err
+			return false
+		}
+		it.trailing = 64 - (uint8(bits) + 1) - it.leading
+
+		fallthrough
+	case 2:
+		bits, err := it.br.readBits(int(64 - it.leading - it.trailing))
+		if err != nil {
+			it.err = err
+			return false
+		}
+		it.val = math.Float64frombits(math.Float64bits(it.val) ^ (bits << it.trailing))
 	}
 
 	return true
@@ -405,4 +365,20 @@ func (s *Series) UnmarshalBinary(b []byte) error {
 		return em.err
 	}
 	return nil
+}
+
+// Maps negative values to positive values while going back and
+// forth (0 = 0, -1 = 1, 1 = 2, -2 = 3, 2 = 4, -3 = 5, 3 = 6 ...)
+// Encodes signed integers into unsigned integers that can be efficiently
+// encoded with varint because negative values must be sign-extended to 64 bits to
+// be varint encoded, thus always taking 10 bytes on the wire.
+//
+// Read more: https://gist.github.com/mfuerstenau/ba870a29e16536fdbaba
+func encodeZigZag32(n int32) uint32 {
+	// Note: The right-shift must be arithmetic which it is in Go.
+	return uint32(n>>31) ^ (uint32(n) << 1)
+}
+
+func decodeZigZag32(n uint32) int32 {
+	return int32((n >> 1) ^ uint32((int32(n&1)<<31)>>31))
 }

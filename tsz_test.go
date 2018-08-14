@@ -2,6 +2,7 @@ package tsz
 
 import (
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/tsenart/go-tsz/testdata"
@@ -342,6 +343,16 @@ func TestEncodeSimilarFloats(t *testing.T) {
 
 	if err := it.Err(); err != nil {
 		t.Errorf("it.Err()=%v, want nil", err)
+	}
+}
+
+func TestZigZagRoundTrip(t *testing.T) {
+	fn := func(n int32) bool {
+		return n == decodeZigZag32(encodeZigZag32(n))
+	}
+
+	if err := quick.Check(fn, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

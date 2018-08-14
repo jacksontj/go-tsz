@@ -179,6 +179,23 @@ func (b *bstream) readBits(nbits int) (uint64, error) {
 	return u, nil
 }
 
+// Read until next unset bit is found or until nbits bits have been read.
+func (b *bstream) readUntilZero(nbits int) (uint64, error) {
+	var u uint64
+	for i := 0; i < nbits; i++ {
+		u <<= 1
+		bit, err := b.readBit()
+		if err != nil {
+			return 0, err
+		}
+		if bit == zero {
+			break
+		}
+		u |= 1
+	}
+	return u, nil
+}
+
 // MarshalBinary implements the encoding.BinaryMarshaler interface
 func (b *bstream) MarshalBinary() ([]byte, error) {
 	buf := new(bytes.Buffer)
