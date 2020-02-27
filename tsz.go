@@ -76,6 +76,10 @@ func (s *Series) Push(t uint64, v float64) {
 	s.Lock()
 	defer s.Unlock()
 
+	s.UnsafePush(t, v)
+}
+
+func (s *Series) UnsafePush(t uint64, v float64) {
 	if s.t == 0 {
 		// first point
 		s.t = t
